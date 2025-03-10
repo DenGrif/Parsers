@@ -23,8 +23,8 @@ def main():
 
     # Инициализация парсеров
     parsers = [
-        #AvitoParser(make, model),
-        #AutoRuParser(make, model),
+        AvitoParser(make, model),
+        AutoRuParser(make, model),
         DromParser(make, model)
     ]
 

@@ -56,11 +56,6 @@ class AvitoParser:
             prices.extend(new_prices)
             self.logger.info(f"Страница {page}: добавлено {len(new_prices)} цен")
 
-            # Проверка на наличие кнопки "Следующая страница"
-            next_page_link = soup.select_one("a[data-marker='pagination-button/nextPage']")
-            if not next_page_link:
-                break
-
             page += 1
             time.sleep(2)  # Задержка между запросами
 

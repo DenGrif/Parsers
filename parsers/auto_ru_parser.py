@@ -1,246 +1,77 @@
 import logging
 from bs4 import BeautifulSoup
 import urllib.parse
-from utils import get_random_user_agent, get_random_proxy, safe_request
+from utils import get_random_user_agent, selenium_request
+import time
+import random
 
-# вариант с debag
 class AutoRuParser:
     def __init__(self, make, model):
         self.make = make
         self.model = model
         self.base_url = "https://auto.ru"
         self.logger = logging.getLogger(__name__)
+        self.max_pages = 10  # Максимум 10 страниц
+        self.user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15",
+            # Можно добавить ещё User-Agent
+        ]
 
     def parse(self):
         encoded_make = urllib.parse.quote(self.make.lower())
         encoded_model = urllib.parse.quote(self.model.lower())
-        search_url = (
-            f"{self.base_url}/moskva/cars/{encoded_make}/{encoded_model}/all/"
-        )
-        headers = {"User-Agent": get_random_user_agent()}
-        proxy = get_random_proxy()
-
-        response = safe_request(search_url, headers, proxy)
-        if not response:
-            return []
-
-        soup = BeautifulSoup(response.text, "html.parser")
         prices = []
+        page = 1
 
-        # Выводим HTML для отладки (если цены не парсятся)
-        with open("debug.html", "w", encoding="utf-8") as f:
-            f.write(response.text)
+        while len(prices) < 100 and page <= self.max_pages:
+            search_url = (
+                f"{self.base_url}/moskva/cars/{encoded_make}/{encoded_model}/used/"
+                f"?page={page}"
+            )
 
-        # Используем селектор для цены
-        for price_container in soup.select(".ListingItemPrice__content"):
-            price_span = price_container.select_one("span")
-            if price_span:
+            # Получение HTML через Selenium
+            html = selenium_request(search_url)
+            soup = BeautifulSoup(html, "html.parser")
+
+            # Сохранение отладочного файла
+            # with open(f"debug_page_{page}.html", "w", encoding="utf-8") as f:
+            #     f.write(html)
+
+            # Извлечение цен
+            price_containers = []
+            # Тип 1: .ListingItemPrice__content
+            for elem in soup.select(".ListingItemPrice__content"):
+                price_containers.append(elem)
+            # Тип 2: .ListingItemPriceNew__link-cYuLr > span
+            for link in soup.select(".ListingItemPriceNew__link-cYuLr"):
+                span = link.select_one("span")
+                if span:
+                    price_containers.append(span)
+            # Тип 3: цены со скидкой
+            for item in soup.select(".ListingItemPriceNew__content-HAVf2 span"):
+                price_containers.append(item)
+
+            for container in price_containers:
                 try:
-                    price_text = price_span.get_text(strip=True)
-                    price_text = price_text.replace("₽", "").replace(" ", "")
-                    price = int("".join(filter(str.isdigit, price_text)))
+                    price_text = container.get_text(strip=True)
+                    price_str = price_text.replace("₽", "").replace("\xa0", "").strip()
+                    price = int(price_str)
                     if 100_000 <= price <= 200_000_000:
                         prices.append(price)
                 except (ValueError, AttributeError):
-                    self.logger.warning("Ошибка парсинга цены на Auto.ru")
+                    self.logger.debug(f"Ошибка парсинга: {price_text}")
+
+            self.logger.info(f"Страница {page}: добавлено {len(price_containers)} цен")
+
+            # Проверка пагинации
+            next_page = soup.select_one(".ListingPagination__next")
+            if next_page and "href" in next_page.attrs:
+                page += 1
+                time.sleep(random.uniform(2, 4))
             else:
-                self.logger.warning("Не найден элемент с ценой в контейнере")
+                self.logger.info("Конец пагинации")
+                break
 
-        self.logger.info(f"Получено {len(prices)} цен с Auto.ru")
+        self.logger.info(f"Обработано {page-1} страниц, всего цен: {len(prices)}")
         return prices[:100]
-
-# **************************************************************************
-# class AutoRuParser:
-#     def __init__(self, make, model):
-#         self.make = make
-#         self.model = model
-#         self.base_url = "https://auto.ru"
-#         self.logger = logging.getLogger(__name__)
-#
-#     def parse(self):
-#         encoded_make = urllib.parse.quote(self.make.lower())
-#         encoded_model = urllib.parse.quote(self.model.lower())
-#         prices = []
-#         page = 1
-#         max_pages = 5  # Максимум 5 страниц
-#
-#         while len(prices) < 100 and page <= max_pages:
-#             search_url = (
-#                 f"{self.base_url}/moskva/cars/{encoded_make}/{encoded_model}/all/"
-#                 f"?page={page}"
-#             )
-#             headers = {
-#                 "User-Agent": get_random_user_agent(),
-#                 "Referer": "https://auto.ru/moskva/cars/all/",
-#                 "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-#             }
-#             proxy = get_random_proxy()
-#
-#             response = safe_request(search_url, headers=headers, proxy=proxy)
-#             if not response:
-#                 self.logger.error(f"Не удалось получить страницу {page}")
-#                 break
-#
-#             soup = BeautifulSoup(response.text, "html.parser")
-#             new_prices = []
-#
-#             # Используем meta-теги для цены
-#             for item in soup.select("meta[itemprop='price']"):
-#                 try:
-#                     price = int(item["content"])
-#                     if 100_000 <= price <= 200_000_000:
-#                         new_prices.append(price)
-#                 except (ValueError, KeyError):
-#                     self.logger.warning("Ошибка парсинга цены через meta-теги")
-#
-#             # Резервный парсинг через CSS-селектор
-#             if not new_prices:
-#                 for price_container in soup.select(".ListingItemPrice__content span"):
-#                     try:
-#                         price_text = price_container.get_text(strip=True).replace("₽", "").replace(" ", "")
-#                         price = int("".join(filter(str.isdigit, price_text)))
-#                         if 100_000 <= price <= 200_000_000:
-#                             new_prices.append(price)
-#                     except (ValueError, AttributeError):
-#                         self.logger.warning("Ошибка парсинга цены через CSS-селектор")
-#
-#             prices.extend(new_prices)
-#             self.logger.info(f"Страница {page}: добавлено {len(new_prices)} цен")
-#
-#             # Проверка на наличие следующей страницы
-#             next_page_link = soup.select_one("a[aria-label='Следующая страница']")
-#             if not next_page_link:
-#                 break
-#
-#             page += 1
-#             time.sleep(2)  # Задержка между запросами
-#
-#         self.logger.info(f"Обработано {page} страниц, получено {len(prices)} цен")
-#         return prices[:100]
-
-#**************************************************************************************
-# вариант с debag:
-# class AutoRuParser:
-#     def __init__(self, make, model):
-#         self.make = make
-#         self.model = model
-#         self.base_url = "https://auto.ru"
-#         self.logger = logging.getLogger(__name__)
-#
-#     def parse(self):
-#         encoded_make = urllib.parse.quote(self.make.lower())
-#         encoded_model = urllib.parse.quote(self.model.lower())
-#         search_url = (
-#             f"{self.base_url}/moskva/cars/{encoded_make}/{encoded_model}/all/"
-#         )
-#         headers = {"User-Agent": get_random_user_agent()}
-#         proxy = get_random_proxy()
-#
-#         response = safe_request(search_url, headers, proxy)
-#         if not response:
-#             return []
-#
-#         soup = BeautifulSoup(response.text, "html.parser")
-#         prices = []
-#
-#         # Выводим HTML для отладки (если цены не парсятся)
-#         with open("debug.html", "w", encoding="utf-8") as f:
-#             f.write(response.text)
-#
-#         # Используем селектор для цены
-#         for price_container in soup.select(".ListingItemPrice__content"):
-#             price_span = price_container.select_one("span")
-#             if price_span:
-#                 try:
-#                     price_text = price_span.get_text(strip=True)
-#                     price_text = price_text.replace("₽", "").replace(" ", "")
-#                     price = int("".join(filter(str.isdigit, price_text)))
-#                     if 100_000 <= price <= 200_000_000:
-#                         prices.append(price)
-#                 except (ValueError, AttributeError):
-#                     self.logger.warning("Ошибка парсинга цены на Auto.ru")
-#             else:
-#                 self.logger.warning("Не найден элемент с ценой в контейнере")
-#
-#         self.logger.info(f"Получено {len(prices)} цен с Auto.ru")
-#         return prices[:100]
-# *************************************************************************************
-# import logging
-# from bs4 import BeautifulSoup
-# import urllib.parse
-# from utils import get_random_user_agent, get_random_proxy, safe_request
-#
-#
-# class AutoRuParser:
-#     def __init__(self, make, model):
-#         self.make = make
-#         self.model = model
-#         self.base_url = "https://auto.ru"
-#         self.logger = logging.getLogger(__name__)
-#
-#     def parse(self):
-#         encoded_make = urllib.parse.quote(self.make.lower())
-#         encoded_model = urllib.parse.quote(self.model.lower())
-#         search_url = (
-#             f"{self.base_url}/moskva/cars/{encoded_make}/{encoded_model}/all/"
-#         )
-#         headers = {"User-Agent": get_random_user_agent()}
-#         proxy = get_random_proxy()
-#
-#         response = safe_request(search_url, headers, proxy)
-#         if not response:
-#             return []
-#
-#         soup = BeautifulSoup(response.text, "html.parser")
-#         prices = []
-#
-#         # Используем правильный селектор для цены
-#         for item in soup.select("ListingItemPrice__content span"):
-#             try:
-#                 price_text = item.get_text(strip=True).replace("₽", "").replace(" ", "")
-#                 price = int("".join(filter(str.isdigit, price_text)))
-#                 if 100_000 <= price <= 200_000_000:
-#                     prices.append(price)
-#             except (ValueError, AttributeError):
-#                 self.logger.warning("Ошибка парсинга цены на Auto.ru")
-#
-#         self.logger.info(f"Получено {len(prices)} цен с Auto.ru")
-#         return prices[:100]
-#*************************************************************************************8
-# import logging
-# from bs4 import BeautifulSoup
-# import urllib.parse
-# from utils import get_random_user_agent, get_random_proxy, safe_request
-#
-#
-# class AutoRuParser:
-#     def __init__(self, make, model):
-#         self.make = make
-#         self.model = model
-#         self.base_url = "https://auto.ru"
-#         self.logger = logging.getLogger(__name__)
-#
-#     def parse(self):
-#         encoded_make = urllib.parse.quote(self.make.lower())
-#         encoded_model = urllib.parse.quote(self.model.lower())
-#         search_url = f"{self.base_url}/moskva/cars/{encoded_make}/{encoded_model}/all/"
-#         headers = {"User-Agent": get_random_user_agent()}
-#         proxy = get_random_proxy()
-#
-#         response = safe_request(search_url, headers, proxy)
-#         if not response:
-#             return []
-#
-#         soup = BeautifulSoup(response.text, "html.parser")
-#         prices = []
-#         # Селекторы могут устареть — проверьте через инструменты разработчика!
-#         for item in soup.select(".ListingItemPrice__content"):
-#             try:
-#                 price_text = item.get_text(strip=True).replace("₽", "").replace(" ", "")
-#                 price = int(price_text)
-#                 prices.append(price)
-#             except (ValueError, AttributeError):
-#                 self.logger.warning("Ошибка парсинга цены на Auto.ru")
-#
-#         self.logger.info(f"Получено {len(prices)} цен с Auto.ru")
-#         return prices[:100]

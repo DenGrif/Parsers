@@ -45,11 +45,6 @@ class DromParser:
             prices.extend(new_prices)
             self.logger.info(f"Страница {page}: добавлено {len(new_prices)} цен")
 
-            # Проверяем, есть ли следующая страница
-            next_page_link = soup.select_one("a[data-ftid='component_pagination-item-next']")
-            if not next_page_link:
-                break
-
             page += 1
             time.sleep(2)  # Задержка между запросами
 

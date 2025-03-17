@@ -1,77 +1,112 @@
 import logging
-from bs4 import BeautifulSoup
 import urllib.parse
-from utils import get_random_user_agent, selenium_request
 import time
 import random
+from datetime import datetime
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from utils import selenium_request
+
 
 class AutoRuParser:
-    def __init__(self, make, model):
+    def __init__(self, make, model, year=None):
         self.make = make
         self.model = model
+        self.year = year
         self.base_url = "https://auto.ru"
         self.logger = logging.getLogger(__name__)
-        self.max_pages = 10  # Максимум 10 страниц
-        self.user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15",
-            # Можно добавить ещё User-Agent
-        ]
 
     def parse(self):
-        encoded_make = urllib.parse.quote(self.make.lower())
-        encoded_model = urllib.parse.quote(self.model.lower())
-        prices = []
-        page = 1
+        options = webdriver.ChromeOptions()
+        options.add_argument("--headless")
+        driver = webdriver.Chrome(
+            service=Service(ChromeDriverManager().install()), options=options
+        )
 
-        while len(prices) < 100 and page <= self.max_pages:
-            search_url = (
-                f"{self.base_url}/moskva/cars/{encoded_make}/{encoded_model}/used/"
-                f"?page={page}"
-            )
+        try:
+            encoded_make = urllib.parse.quote(self.make.lower())
+            encoded_model = urllib.parse.quote(self.model.lower())
+            prices = []
+            page = 1
 
-            # Получение HTML через Selenium
-            html = selenium_request(search_url)
-            soup = BeautifulSoup(html, "html.parser")
+            start_year = self.year if self.year else 2000
+            end_year = datetime.now().year
 
-            # Сохранение отладочного файла
-            # with open(f"debug_page_{page}.html", "w", encoding="utf-8") as f:
-            #     f.write(html)
+            while len(prices) < 100:  # Без ограничения на страницы
+                search_url = f"{self.base_url}/moskva/cars/{encoded_make}/{encoded_model}/used/?page={page}"
+                html = selenium_request(search_url, driver)
+                soup = BeautifulSoup(html, "html.parser")
 
-            # Извлечение цен
-            price_containers = []
-            # Тип 1: .ListingItemPrice__content
-            for elem in soup.select(".ListingItemPrice__content"):
-                price_containers.append(elem)
-            # Тип 2: .ListingItemPriceNew__link-cYuLr > span
-            for link in soup.select(".ListingItemPriceNew__link-cYuLr"):
-                span = link.select_one("span")
-                if span:
-                    price_containers.append(span)
-            # Тип 3: цены со скидкой
-            for item in soup.select(".ListingItemPriceNew__content-HAVf2 span"):
-                price_containers.append(item)
+                # Извлечение цен
+                new_prices = []
+                for item in soup.select(".ListingItem"):
+                    name_tag = item.select_one(".ListingItemTitle__link")
+                    if not name_tag:
+                        self.logger.debug(f"Страница {page}: Объявление без имени")
+                        continue
 
-            for container in price_containers:
-                try:
-                    price_text = container.get_text(strip=True)
-                    price_str = price_text.replace("₽", "").replace("\xa0", "").strip()
-                    price = int(price_str)
-                    if 100_000 <= price <= 200_000_000:
-                        prices.append(price)
-                except (ValueError, AttributeError):
-                    self.logger.debug(f"Ошибка парсинга: {price_text}")
+                    name_text = name_tag.get_text(strip=True)
 
-            self.logger.info(f"Страница {page}: добавлено {len(price_containers)} цен")
+                    # Парсинг года
+                    year_tag = item.select_one(".ListingItem__yearBlock .ListingItem__year")
+                    if year_tag:
+                        try:
+                            car_year = int(year_tag.get_text(strip=True))
+                            if not (start_year <= car_year <= end_year):
+                                self.logger.debug(f"Страница {page}: Год {car_year} вне диапазона")
+                                continue
+                        except ValueError:
+                            self.logger.debug(f"Страница {page}: Ошибка парсинга года")
+                            continue
 
-            # Проверка пагинации
-            next_page = soup.select_one(".ListingPagination__next")
-            if next_page and "href" in next_page.attrs:
-                page += 1
-                time.sleep(random.uniform(2, 4))
-            else:
-                self.logger.info("Конец пагинации")
-                break
+                    # Парсинг цены
+                    price_containers = [
+                        item.select_one(".ListingItemPrice__content a span"),
+                        item.select_one(".ListingItemPrice_highlighted .ListingItemPrice__content"),
+                        item.select_one(".ListingItemPrice_withPopup .ListingItemPrice__content a span"),
+                    ]
 
-        self.logger.info(f"Обработано {page-1} страниц, всего цен: {len(prices)}")
+                    for price_container in price_containers:
+                        if price_container:
+                            price_text = price_container.get_text(strip=True).replace("₽", "").replace("\xa0", "").strip()
+                            if price_text.startswith("от "):
+                                price_text = price_text[3:]
+                            try:
+                                price = int(price_text)
+                                if 100_000 <= price <= 200_000_000:
+                                    new_prices.append(price)
+                                    self.logger.debug(f"Страница {page}: {name_text}, {car_year}, {price} добавлена")
+                                else:
+                                    self.logger.debug(f"Страница {page}: Цена {price} вне диапазона")
+                            except ValueError:
+                                self.logger.warning(f"Страница {page}: Ошибка парсинга цены для {name_text}")
+                            break  # Выход после успешного нахождения цены
+
+                prices.extend(new_prices)
+                self.logger.info(f"Страница {page}: добавлено {len(new_prices)} цен")
+
+                # Проверка, если достигли 100 цен
+                if len(prices) >= 100:
+                    self.logger.info("Достигнуто 100 цен, завершаем парсинг.")
+                    break
+
+                # Проверка пагинации
+                next_page = soup.select_one(".ListingPagination__next")
+                if next_page and "href" in next_page.attrs:
+                    page += 1
+                    time.sleep(random.uniform(2, 4))  # Задержка для маскировки
+                else:
+                    self.logger.info("Конец пагинации, завершаем парсинг.")
+                    break
+        finally:
+            driver.quit()  # Гарантированное закрытие WebDriver
+
+        self.logger.info(f"Обработано {page} страниц, получено {len(prices)} цен")
+
+        # Пометка, если найдено менее 100 цен
+        if len(prices) < 100:
+            self.logger.warning(f"Найдено всего {len(prices)} цен, расчет производится на основе имеющихся данных.")
+
         return prices[:100]

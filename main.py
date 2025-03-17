@@ -14,8 +14,11 @@ def main():
     parser = argparse.ArgumentParser(description="Расчет залоговой стоимости автомобиля")
     parser.add_argument("--make", required=True, help="Марка автомобиля")
     parser.add_argument("--model", required=True, help="Модель автомобиля")
+    parser.add_argument("--year", type=int, help="Год выпуска автомобиля")
     args = parser.parse_args()
+
     make, model = args.make, args.model
+    year = args.year
 
     # Очистка названия от нежелательных символов
     sanitized_make = re.sub(r'[^a-zA-Z0-9]', '_', make.lower())
@@ -23,9 +26,9 @@ def main():
 
     # Инициализация парсеров
     parsers = [
-        AvitoParser(make, model),
-        AutoRuParser(make, model),
-        DromParser(make, model)
+        AvitoParser(make, model, year),
+        AutoRuParser(make, model, year),
+        #DromParser(make, model)
     ]
 
     # Многопоточный парсинг
@@ -54,11 +57,13 @@ def main():
     output = {
         "make": make,
         "model": model,
+        "year": year,
         **result
     }
 
-    # Формирование имени файла с датой, маркой и моделью
-    filename = f"data/{datetime.now().strftime('%Y-%m-%d')}_{sanitized_make}_{sanitized_model}_results.json"
+    # Формирование имени файла с датой, маркой, моделью и годом
+    filename = f"data/{datetime.now().strftime('%d-%m-%Y__%H-%M')}_{sanitized_make}_{sanitized_model}_{year}_results.json"
+
 
     # Сохранение в JSON
     with open(filename, 'w', encoding='utf-8') as f:

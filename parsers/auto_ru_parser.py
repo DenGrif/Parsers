@@ -61,7 +61,7 @@ class AutoRuParser:
                             self.logger.debug(f"Страница {page}: Ошибка парсинга года")
                             continue
 
-                    # Парсинг цены
+                    # Парсинг цен
                     price_containers = [
                         item.select_one(".ListingItemPrice__content a span"),
                         item.select_one(".ListingItemPrice_highlighted .ListingItemPrice__content"),

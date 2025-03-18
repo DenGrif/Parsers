@@ -10,7 +10,7 @@ import time
 
 
 def selenium_request(url, driver):
-    """Функция для загрузки HTML-страницы через Selenium с использованием переданного WebDriver."""
+    """Функция для загрузки HTML-страницы через Selenium для auto.ru"""
     try:
         driver.get(url)
 
@@ -33,28 +33,45 @@ def selenium_request(url, driver):
         return ""
 
 
+def selenium_request_drom(url, driver):
+    """Функция для загрузки HTML-страницы через Selenium для Drom.ru."""
+    try:
+        driver.get(url)
+        # Ждём загрузки данных
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "[data-ftid='bulls-list_bull']"))
+        )
+        html = driver.page_source
+        logging.debug("HTML-код успешно загружен.")  # Вместо огромного HTML-файла
+        return html
+
+    except Exception as e:
+        logging.error(f"Ошибка при работе с Selenium для Drom.ru: {str(e)}")
+    return ""
+
+
+# Логирование
 def setup_logging():
     log_filename = f"logs/parser_log_{datetime.now().strftime('%Y-%m-%d__%H-%M')}.log"
     logging.basicConfig(
         level=logging.DEBUG,  # Уровень логирования DEBUG
         format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
         handlers=[
-            logging.FileHandler(log_filename, encoding="utf-8"),  # ✅ Запись в новый файл
+            logging.FileHandler(log_filename, encoding="utf-8"),  # Запись в новый файл,
             logging.StreamHandler()
         ]
     )
 
-    # Отключаем логи Selenium и urllib3, которые пишут HTML-страницы
+# Отключаем логи Selenium и urllib3, которые пишут HTML-страницы
     logging.getLogger("selenium.webdriver.remote.remote_connection").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
-
 
 # User-Agent и прокси
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    # Нет мобильных User-Agent
+    # Можно добавить ещё User-Agent
 ]
 
 PROXIES = [
@@ -78,7 +95,7 @@ def safe_request(url, headers=None, proxy=None, timeout=10):
         "User-Agent": get_random_user_agent(),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Upgrade-In secure-Requests": "1",
+        "Upgrade-Insecure-Requests": "1",
         "Connection": "keep-alive",
         "Cache-Control": "max-age=0"
     })

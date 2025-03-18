@@ -28,7 +28,7 @@ def main():
     parsers = [
         AvitoParser(make, model, year),
         AutoRuParser(make, model, year),
-        #DromParser(make, model)
+        DromParser(make, model, year)
     ]
 
     # Многопоточный парсинг
@@ -63,7 +63,6 @@ def main():
 
     # Формирование имени файла с датой, маркой, моделью и годом
     filename = f"data/{datetime.now().strftime('%d-%m-%Y__%H-%M')}_{sanitized_make}_{sanitized_model}_{year}_results.json"
-
 
     # Сохранение в JSON
     with open(filename, 'w', encoding='utf-8') as f:

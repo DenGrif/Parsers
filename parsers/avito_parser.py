@@ -1,9 +1,9 @@
 import logging
+import re
 from bs4 import BeautifulSoup
 from utils import get_random_user_agent, get_random_proxy, safe_request
 import urllib.parse
 import time
-import re
 import random
 from datetime import datetime
 
@@ -49,17 +49,19 @@ class AvitoParser:
             soup = BeautifulSoup(response.text, "html.parser")
             new_prices = []
 
-            # Извлекаем цены и проверяем год выпуска
+            # Извлекаем объявления
             for item in soup.select(".iva-item-content-OWwoq"):
                 name_tag = item.select_one('h3[itemprop="name"]')
                 if not name_tag:
                     self.logger.debug(f"Страница {page}: Объявление без имени")
                     continue
 
-                name_text = name_tag.get_text(strip=True)
-                match = re.search(r'\b(\d{4})\b', name_text)
-                if match:
-                    car_year = int(match.group(1))
+                name_text = name_tag.get_text(strip=True).replace("\xa0", " ")  # Убираем неразрывные пробелы
+
+                # Извлекаем год выпуска
+                year_match = re.search(r'\b(\d{4})\b', name_text)
+                if year_match:
+                    car_year = int(year_match.group(1))
                     if not (start_year <= car_year <= end_year):
                         self.logger.debug(
                             f"Страница {page}: Объявление {name_text}, год {car_year} не в диапазоне [{start_year}-{end_year}]"
@@ -69,9 +71,18 @@ class AvitoParser:
                     self.logger.debug(f"Страница {page}: Объявление {name_text} без года выпуска")
                     continue
 
+                # Извлекаем пробег
+                mileage_match = re.search(r'(\d{1,3}(?: \d{3})*)\s*км', name_text)
+                if mileage_match:
+                    mileage_text = mileage_match.group(1).replace(" ", "")  # Убираем пробелы в числе
+                    mileage = int(mileage_text)
+                else:
+                    mileage = None  # Если пробег не найден, ставим None
+
+                # Извлекаем цену
                 price_tag = item.select_one(".iva-item-priceStep-TIzu3")
                 if not price_tag:
-                    self.logger.debug(f"Страница {page}: Объявление {name_text} без цены")
+                    self.logger.debug(f"Страница {page}: {name_text} без цены")
                     continue
 
                 price_meta = price_tag.select_one("meta[itemprop='price']")
@@ -79,7 +90,9 @@ class AvitoParser:
                     price = int(price_meta["content"])
                     if 100_000 <= price <= 200_000_000:
                         new_prices.append(price)
-                        self.logger.debug(f"Страница {page}: {name_text}, {car_year}, цена {price} добавлена")
+                        self.logger.debug(
+                            f"Страница {page}: {name_text}, {car_year}, пробег: {mileage} км, цена {price} добавлена"
+                        )
                     else:
                         self.logger.debug(f"Страница {page}: Объявление {name_text}, цена {price} вне диапазона")
                 else:
@@ -90,7 +103,9 @@ class AvitoParser:
                             price = int(price_str)
                             if 100_000 <= price <= 200_000_000:
                                 new_prices.append(price)
-                                self.logger.debug(f"Страница {page}: {name_text}, {car_year}, цена {price} добавлена")
+                                self.logger.debug(
+                                    f"Страница {page}: {name_text}, {car_year}, пробег: {mileage} км, цена {price} добавлена"
+                                )
                             else:
                                 self.logger.debug(f"Страница {page}: Цена {price} вне диапазона")
                     except (ValueError, AttributeError):
@@ -99,14 +114,14 @@ class AvitoParser:
             prices.extend(new_prices)
             self.logger.info(f"Страница {page}: добавлено {len(new_prices)} цен")
 
-            # 🔹 **Проверка наличия кнопки "Следующая страница"**
+            # Проверка кнопки "Следующая страница"
             next_page = soup.select_one('[data-marker="pagination-button/nextPage"]')
             if next_page:
                 page += 1
-                time.sleep(random.uniform(10, 15))  # Увеличенная задержка между запросами
+                time.sleep(random.uniform(10, 15))  # Умеренная задержка между запросами
             else:
                 self.logger.info("Конец пагинации, завершаем парсинг.")
-                break  # 🔹 Останавливаем цикл, если страниц больше нет
+                break  # Останавливаем цикл, если страниц больше нет
 
         self.logger.info(f"Обработано {page} страниц, получено {len(prices)} цен")
 
@@ -115,3 +130,6 @@ class AvitoParser:
             self.logger.warning(f"Найдено всего {len(prices)} цен, расчет производится на основе имеющихся данных.")
 
         return prices[:100]
+
+
+

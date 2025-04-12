@@ -1,3 +1,4 @@
+# старый рабочий
 import logging
 import re
 import urllib.parse
@@ -5,11 +6,8 @@ import time
 import random
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
-from utils import selenium_request_drom, setup_logging
+from utils import selenium_request_drom
 
-# Настройка логирования
-setup_logging()
-logger = logging.getLogger(__name__)
 
 class SafeChrome(uc.Chrome):
     def __del__(self):
@@ -19,11 +17,13 @@ class SafeChrome(uc.Chrome):
         except:
             pass
 
+
 class DromParser:
-    def __init__(self, make, model, year=None, use_proxy=True):
+    def __init__(self, make, model, year=None, limit=100, use_proxy=True):
         self.make = make
         self.model = model
         self.year = year if isinstance(year, list) else [year] if year else []
+        self.limit = limit
         self.use_proxy = use_proxy
         self.base_url = "https://auto.drom.ru"
         self.logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ class DromParser:
             finally:
                 self.driver = None
 
-    def parse(self, collected_prices, collected_prices_lock, stop_event, limit):
+    def parse(self):
         encoded_make = urllib.parse.quote(self.make.lower())
         encoded_model = urllib.parse.quote(self.model.lower())
         prices = []
@@ -74,15 +74,7 @@ class DromParser:
             start_year = end_year = None
 
         try:
-            while not stop_event.is_set():
-                with collected_prices_lock:
-                    total_collected = collected_prices + len(prices)
-                    logger.debug(f"Проверка перед парсингом страницы {page}: collected_prices={collected_prices}, prices={len(prices)}, total_collected={total_collected}, limit={limit}")
-                    if total_collected >= limit:
-                        logger.info(f"Достигнуто общее количество цен: {limit}. Останавливаем парсинг.")
-                        stop_event.set()
-                        break
-
+            while len(prices) < self.limit:
                 search_url = f"{self.base_url}/{encoded_make}/{encoded_model}/page{page}/" if page > 1 else f"{self.base_url}/{encoded_make}/{encoded_model}/"
                 html, self.driver, success = selenium_request_drom(search_url, self.driver, use_proxy=self.use_proxy)
 
@@ -136,6 +128,12 @@ class DromParser:
                         self.logger.debug(
                             f"Страница {page}: {name_text}, Цена: {price if price else 'не указана'}, вне диапазона")
 
+                # Проверка, если достигли лимита
+                if len(prices) + len(new_prices) >= self.limit:
+                    prices.extend(new_prices[: self.limit - len(prices)])
+                    self.logger.info(f"Достигнуто {self.limit} цен, завершаем парсинг.")
+                    break
+
                 prices.extend(new_prices)
                 self.logger.info(f"Страница {page}: добавлено {len(new_prices)} цен")
 
@@ -147,25 +145,25 @@ class DromParser:
                     self.logger.debug(f"Задержка перед следующей страницей: {delay:.2f} сек.")
                     time.sleep(delay)
                 else:
-                    logger.info("Конец пагинации, завершаем парсинг.")
+                    self.logger.info("Конец пагинации, завершаем парсинг.")
                     break
 
         except Exception as e:
             self.logger.error(f"Ошибка при парсинге: {e}")
             raise
         finally:
-            self.close_driver()  # Гарантированное закрытие WebDriver
+            self.close_driver() # Гарантированное закрытие WebDriver
 
         self.logger.info(f"Обработано {page} страниц, получено {len(prices)} цен")
 
         # Пометка, если найдено менее заданного лимита цен
-        if len(prices) < limit:
+        if len(prices) < self.limit:
             self.logger.warning(f"Найдено всего {len(prices)} цен, расчет производится на основе имеющихся данных.")
-        return prices
+        return prices[:self.limit]
 
 
 
-# старый рабочий
+# попытка одного счётчика
 # import logging
 # import re
 # import urllib.parse
@@ -173,8 +171,11 @@ class DromParser:
 # import random
 # import undetected_chromedriver as uc
 # from bs4 import BeautifulSoup
-# from utils import selenium_request_drom
+# from utils import selenium_request_drom, setup_logging
 #
+# # Настройка логирования
+# setup_logging()
+# logger = logging.getLogger(__name__)
 #
 # class SafeChrome(uc.Chrome):
 #     def __del__(self):
@@ -184,13 +185,11 @@ class DromParser:
 #         except:
 #             pass
 #
-#
 # class DromParser:
-#     def __init__(self, make, model, year=None, limit=100, use_proxy=True):
+#     def __init__(self, make, model, year=None, use_proxy=True):
 #         self.make = make
 #         self.model = model
 #         self.year = year if isinstance(year, list) else [year] if year else []
-#         self.limit = limit
 #         self.use_proxy = use_proxy
 #         self.base_url = "https://auto.drom.ru"
 #         self.logger = logging.getLogger(__name__)
@@ -226,7 +225,7 @@ class DromParser:
 #             finally:
 #                 self.driver = None
 #
-#     def parse(self):
+#     def parse(self, collected_prices, collected_prices_lock, stop_event, limit):
 #         encoded_make = urllib.parse.quote(self.make.lower())
 #         encoded_model = urllib.parse.quote(self.model.lower())
 #         prices = []
@@ -241,7 +240,15 @@ class DromParser:
 #             start_year = end_year = None
 #
 #         try:
-#             while len(prices) < self.limit:
+#             while not stop_event.is_set():
+#                 with collected_prices_lock:
+#                     total_collected = collected_prices + len(prices)
+#                     logger.debug(f"Проверка перед парсингом страницы {page}: collected_prices={collected_prices}, prices={len(prices)}, total_collected={total_collected}, limit={limit}")
+#                     if total_collected >= limit:
+#                         logger.info(f"Достигнуто общее количество цен: {limit}. Останавливаем парсинг.")
+#                         stop_event.set()
+#                         break
+#
 #                 search_url = f"{self.base_url}/{encoded_make}/{encoded_model}/page{page}/" if page > 1 else f"{self.base_url}/{encoded_make}/{encoded_model}/"
 #                 html, self.driver, success = selenium_request_drom(search_url, self.driver, use_proxy=self.use_proxy)
 #
@@ -295,12 +302,6 @@ class DromParser:
 #                         self.logger.debug(
 #                             f"Страница {page}: {name_text}, Цена: {price if price else 'не указана'}, вне диапазона")
 #
-#                 # Проверка, если достигли лимита
-#                 if len(prices) + len(new_prices) >= self.limit:
-#                     prices.extend(new_prices[: self.limit - len(prices)])
-#                     self.logger.info(f"Достигнуто {self.limit} цен, завершаем парсинг.")
-#                     break
-#
 #                 prices.extend(new_prices)
 #                 self.logger.info(f"Страница {page}: добавлено {len(new_prices)} цен")
 #
@@ -312,18 +313,22 @@ class DromParser:
 #                     self.logger.debug(f"Задержка перед следующей страницей: {delay:.2f} сек.")
 #                     time.sleep(delay)
 #                 else:
-#                     self.logger.info("Конец пагинации, завершаем парсинг.")
+#                     logger.info("Конец пагинации, завершаем парсинг.")
 #                     break
 #
 #         except Exception as e:
 #             self.logger.error(f"Ошибка при парсинге: {e}")
 #             raise
 #         finally:
-#             self.close_driver() # Гарантированное закрытие WebDriver
+#             self.close_driver()  # Гарантированное закрытие WebDriver
 #
 #         self.logger.info(f"Обработано {page} страниц, получено {len(prices)} цен")
 #
 #         # Пометка, если найдено менее заданного лимита цен
-#         if len(prices) < self.limit:
+#         if len(prices) < limit:
 #             self.logger.warning(f"Найдено всего {len(prices)} цен, расчет производится на основе имеющихся данных.")
-#         return prices[:self.limit]
+#         return prices
+
+
+
+

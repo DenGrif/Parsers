@@ -1,0 +1,12 @@
+{
+    "make": "toyota",
+    "model": "camry",
+    "year": [
+        2020,
+        2022
+    ],
+    "limit": 30,
+    "cars_parsed": 30,
+    "average_price": 2898400,
+    "collateral_value": 2318720
+}

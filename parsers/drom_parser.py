@@ -19,11 +19,14 @@ class SafeChrome(uc.Chrome):
 
 
 class DromParser:
-    def __init__(self, make, model, year=None, limit=100, use_proxy=True):
+    def __init__(self, make, model, year=None, stop_event=None, found_prices=None, lock=None, limit=100, use_proxy=True):
         self.make = make
         self.model = model
         self.year = year if isinstance(year, list) else [year] if year else []
-        self.limit = limit
+        self.stop_event = stop_event  # Флаг остановки
+        self.found_prices = found_prices  # Общий список цен
+        self.lock = lock  # Блокировка для синхронизации
+        self.limit = limit  # Сохраняем лимит
         self.use_proxy = use_proxy
         self.base_url = "https://auto.drom.ru"
         self.logger = logging.getLogger(__name__)
@@ -62,7 +65,6 @@ class DromParser:
     def parse(self):
         encoded_make = urllib.parse.quote(self.make.lower())
         encoded_model = urllib.parse.quote(self.model.lower())
-        prices = []
         page = 1
 
         # Определение диапазона годов
@@ -74,7 +76,7 @@ class DromParser:
             start_year = end_year = None
 
         try:
-            while len(prices) < self.limit:
+            while not self.stop_event.is_set():
                 search_url = f"{self.base_url}/{encoded_make}/{encoded_model}/page{page}/" if page > 1 else f"{self.base_url}/{encoded_make}/{encoded_model}/"
                 html, self.driver, success = selenium_request_drom(search_url, self.driver, use_proxy=self.use_proxy)
 
@@ -89,6 +91,9 @@ class DromParser:
 
                 # Извлекаем объявления
                 for item in soup.select('[data-ftid="bulls-list_bull"]'):
+                    if self.stop_event.is_set():  # Проверяем флаг остановки перед каждым объявлением
+                        break
+
                     name_tag = item.select_one('[data-ftid="bull_title"] h3')
                     if not name_tag:
                         self.logger.debug(f"Страница {page}: Объявление без названия")
@@ -128,38 +133,32 @@ class DromParser:
                         self.logger.debug(
                             f"Страница {page}: {name_text}, Цена: {price if price else 'не указана'}, вне диапазона")
 
-                # Проверка, если достигли лимита
-                if len(prices) + len(new_prices) >= self.limit:
-                    prices.extend(new_prices[: self.limit - len(prices)])
-                    self.logger.info(f"Достигнуто {self.limit} цен, завершаем парсинг.")
-                    break
-
-                prices.extend(new_prices)
-                self.logger.info(f"Страница {page}: добавлено {len(new_prices)} цен")
+                # Добавляем новые цены в общий список
+                with self.lock:
+                    self.found_prices.extend(new_prices)
+                    self.logger.info(f"Страница {page}: добавлено {len(new_prices)} цен. Всего: {len(self.found_prices)}")
+                    if len(self.found_prices) >= self.limit:  # Проверяем общий лимит
+                        self.stop_event.set()  # Устанавливаем флаг остановки
+                        self.logger.info(f"Достигнут лимит в {len(self.found_prices)} цен. Завершаю парсинг.")
+                        return
 
                 # Проверка кнопки "Следующая страница"
                 next_page = soup.select_one('[data-ftid="component_pagination-item-next"]')
-                if next_page and "href" in next_page.attrs:
-                    page += 1
-                    delay = random.uniform(1, 3) if self.use_proxy else random.uniform(10, 15)
-                    self.logger.debug(f"Задержка перед следующей страницей: {delay:.2f} сек.")
-                    time.sleep(delay)
-                else:
-                    self.logger.info("Конец пагинации, завершаем парсинг.")
+                if not next_page or self.stop_event.is_set():
                     break
+
+                page += 1
+                delay = random.uniform(1, 3) if self.use_proxy else random.uniform(10, 15)
+                self.logger.debug(f"Задержка перед следующей страницей: {delay:.2f} сек.")
+                time.sleep(delay)
 
         except Exception as e:
             self.logger.error(f"Ошибка при парсинге: {e}")
             raise
         finally:
-            self.close_driver() # Гарантированное закрытие WebDriver
+            self.close_driver()  # Гарантированное закрытие WebDriver
 
-        self.logger.info(f"Обработано {page} страниц, получено {len(prices)} цен")
-
-        # Пометка, если найдено менее заданного лимита цен
-        if len(prices) < self.limit:
-            self.logger.warning(f"Найдено всего {len(prices)} цен, расчет производится на основе имеющихся данных.")
-        return prices[:self.limit]
+        self.logger.info(f"Обработано {page} страниц, получено {len(self.found_prices)} цен")
 
 
 

@@ -18,6 +18,7 @@ class SafeChrome(uc.Chrome):
 
 class AutoRuParser:
     def __init__(self, make, model, year=None, stop_event=None, found_prices=None, lock=None, limit=100, use_proxy=True):
+        logging.info("Инициализация AutoRuParser...")
         self.make = make
         self.model = model
         self.year = year if isinstance(year, list) else [year] if year else []
@@ -29,6 +30,7 @@ class AutoRuParser:
         self.base_url = "https://auto.ru"
         self.logger = logging.getLogger(__name__)
         self.driver = None
+        logging.info("Инициализация AutoRuParser завершена.")
 
         # Настройка ChromeOptions
         self.options = uc.ChromeOptions()
@@ -74,7 +76,7 @@ class AutoRuParser:
 
         try:
             while not self.stop_event.is_set():
-                search_url = f"{self.base_url}/moskva/cars/{encoded_make}/{encoded_model}/used/?page={page}"
+                search_url = f"{self.base_url}/cars/{encoded_make}/{encoded_model}/used/?page={page}"
                 html, self.driver, success = selenium_request(search_url, self.driver, use_proxy=self.use_proxy)
 
                 if not success:
@@ -128,10 +130,10 @@ class AutoRuParser:
                                 price = int(price_text)
                                 if 100_000 <= price <= 200_000_000:
                                     new_prices.append(price)
-                                    self.logger.debug(f"Страница {page}: {name_text}, Цена {price} добавлена")
+                                    self.logger.debug(f"Страница {page}: {name_text}, Год {car_year}, Цена {price} добавлена")
                                     break
                                 else:
-                                    self.logger.debug(f"Страница {page}: Цена {price} вне диапазона")
+                                    self.logger.debug(f"Страница {page}: Год {car_year}, Цена {price}, Год вне диапазона")
                             except ValueError:
                                 self.logger.warning(f"Страница {page}: Ошибка парсинга цены для {name_text}")
                             break

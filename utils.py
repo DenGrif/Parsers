@@ -29,14 +29,17 @@ def get_working_proxy(max_attempts=9):
     Пытается найти рабочий прокси за указанное число попыток
     возвращает прокси в формате "ip:port@login:password" или None
     """
+    logging.info("Начало проверки прокси...")
     try:
         # Загрузка прокси из файла с логированием
         try:
             with open(PROXY_FILE, "r") as f:
                 proxies = [line.strip() for line in f if line.strip()]
+                logging.info(f"Прокси загружены из файла: {len(proxies)} шт.")
 
             if proxies:
                 logging.info(f"Загружено {len(proxies)} прокси из файла {PROXY_FILE}")
+                logging.info("Проверка прокси завершена.")
             else:
                 logging.warning(f"Файл {PROXY_FILE} пуст — работа будет вестись с собственным IP")
                 return None
@@ -96,6 +99,7 @@ def make_screenshot(driver, filename_prefix="error"):
 
 def safe_request(url, headers=None, timeout=15, use_proxy=True, retries=3, use_own_ip=False):
     """Загрузка HTML-страницы через requests для Avito.ru."""
+    logging.info(f"Начало запроса через safe_request: {url}")
     if headers is None:
         headers = {}
 
@@ -108,7 +112,7 @@ def safe_request(url, headers=None, timeout=15, use_proxy=True, retries=3, use_o
     })
 
     proxy_used = False  # Для отслеживания, использовался ли прокси
-
+    logging.info(f"Запрос через safe_request завершен: {url}")
     for attempt in range(retries + 1):
         try:
             if use_own_ip:
@@ -167,6 +171,7 @@ def safe_request(url, headers=None, timeout=15, use_proxy=True, retries=3, use_o
             logging.error(f"Неизвестная ошибка: {str(e)}")
             return None
     return None
+
 
 def selenium_request(url, driver, use_proxy=True, retries=3):
     """Загрузка HTML-страницы через Selenium для Auto.ru"""

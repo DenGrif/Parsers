@@ -1,4 +1,3 @@
-# старый рабочий
 import logging
 import re
 import urllib.parse
@@ -20,6 +19,7 @@ class SafeChrome(uc.Chrome):
 
 class DromParser:
     def __init__(self, make, model, year=None, stop_event=None, found_prices=None, lock=None, limit=100, use_proxy=True):
+        logging.info("Инициализация DromParser...")
         self.make = make
         self.model = model
         self.year = year if isinstance(year, list) else [year] if year else []
@@ -31,10 +31,11 @@ class DromParser:
         self.base_url = "https://auto.drom.ru"
         self.logger = logging.getLogger(__name__)
         self.driver = None
+        logging.info("Инициализация DromParser...")
 
         # Настройка ChromeOptions
         self.options = uc.ChromeOptions()
-        self.options.add_argument("--headless")
+        self.options.add_argument("--headless=new")
         self.options.add_argument("--ignore-certificate-errors")
         self.options.add_argument("--disable-blink-features=AutomationControlled")
         self.options.add_argument("--disable-blink-features=WebRTC")
@@ -43,8 +44,22 @@ class DromParser:
             "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
 
-        # Создание и запуск WebDriver
-        self.driver = SafeChrome(options=self.options)
+        # Указание пользовательского профиля для ускорения запуска
+        self.options.user_data_dir = "/home/kali/.config/selenium-profile"
+
+        # Указание пути к установленному браузеру (если известно)
+        browser_path = "/usr/bin/chromium"  # можно адаптировать под свой путь
+        try:
+            self.driver = SafeChrome(
+                options=self.options,
+                version_main=120,
+                browser_executable_path=browser_path
+            )
+        except Exception as e:
+            self.logger.warning(f"Не удалось запустить Chrome по указанному пути: {e}")
+            # fallback без указания пути
+            self.driver = SafeChrome(options=self.options, version_main=120)
+
         self.driver.get(self.base_url)
 
     def __enter__(self):
@@ -100,13 +115,14 @@ class DromParser:
                         continue
 
                     name_text = name_tag.get_text(strip=True)
+
                     car_year = None
                     price = None
 
                     # Парсинг года
-                    year_match = re.search(r'\b(\d{4})\b', name_text)
-                    if year_match:
-                        car_year = int(year_match.group(1))
+                    year_part = name_text.split(',')[-1].strip()
+                    if year_part.isdigit() and len(year_part) == 4:
+                        car_year = int(year_part)
 
                     # Парсинг цены
                     price_tag = item.select_one('[data-ftid="bull_price"]')
@@ -123,7 +139,7 @@ class DromParser:
                     # Проверка соответствия года диапазону
                     if car_year and start_year and end_year and not (start_year <= car_year <= end_year):
                         self.logger.debug(
-                            f"Страница {page}: {name_text}, Цена: {price if price else 'не указана'}, вне диапазона")
+                            f"Страница {page}: {name_text}, Цена: {price if price else 'не указана'}, год вне диапазона")
                         continue
 
                     if price and 100_000 <= price <= 200_000_000:
@@ -131,7 +147,7 @@ class DromParser:
                         self.logger.debug(f"Страница {page}: {name_text}, Цена: {price}, добавлена")
                     else:
                         self.logger.debug(
-                            f"Страница {page}: {name_text}, Цена: {price if price else 'не указана'}, вне диапазона")
+                            f"Страница {page}: Цена: {price if price else 'не указана'}, Год вне диапазона")
 
                 # Добавляем новые цены в общий список
                 with self.lock:
@@ -159,3 +175,4 @@ class DromParser:
             self.close_driver()  # Гарантированное закрытие WebDriver
 
         self.logger.info(f"Обработано {page} страниц, получено {len(self.found_prices)} цен")
+

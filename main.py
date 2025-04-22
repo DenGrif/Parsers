@@ -47,12 +47,13 @@ def main():
     lock = Lock()
 
     # Инициализация парсеров без локального лимита
+    logging.info("Начало инициализации парсеров в main...")
     parsers = [
         AvitoParser(normalize_make(make, "avito.ru"), model, year, stop_event, found_prices, lock, limit=limit, use_proxy=True),
-        AutoRuParser(normalize_make(make, "auto.ru"), model, year, stop_event, found_prices, lock, limit=limit, use_proxy=True),
-        DromParser(normalize_make(make, "drom.ru"), model, year, stop_event, found_prices, lock, limit=limit, use_proxy=True)
+        #AutoRuParser(normalize_make(make, "auto.ru"), model, year, stop_event, found_prices, lock, limit=limit, use_proxy=True),
+        #DromParser(normalize_make(make, "drom.ru"), model, year, stop_event, found_prices, lock, limit=limit, use_proxy=True)
     ]
-
+    logging.info("Инициализация парсеров в main завершена.")
     # Многопоточный парсинг
     threads = [threading.Thread(target=parser.parse) for parser in parsers]
     for t in threads:

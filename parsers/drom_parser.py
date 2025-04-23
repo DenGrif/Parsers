@@ -1,11 +1,17 @@
 import logging
+import shutil
+import tempfile
 import re
+import subprocess
 import urllib.parse
 import time
 import random
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
 from utils import selenium_request_drom
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 
 class SafeChrome(uc.Chrome):
@@ -31,36 +37,40 @@ class DromParser:
         self.base_url = "https://auto.drom.ru"
         self.logger = logging.getLogger(__name__)
         self.driver = None
-        logging.info("Инициализация DromParser...")
+        logging.info("Инициализация DromParser завершена. ")
+
+        # Создаем временные директории для профиля и драйвера
+        self.user_data_dir = tempfile.mkdtemp()
+        self.driver_dir = tempfile.mkdtemp()
 
         # Настройка ChromeOptions
         self.options = uc.ChromeOptions()
         self.options.add_argument("--headless=new")
+        self.options.add_argument("--no-sandbox")
+        self.options.add_argument("--disable-dev-shm-usage")
+        self.options.add_argument("--disable-gpu")
         self.options.add_argument("--ignore-certificate-errors")
         self.options.add_argument("--disable-blink-features=AutomationControlled")
-        self.options.add_argument("--disable-blink-features=WebRTC")
-        self.options.add_argument("--disable-features=SecureDns")
+        self.options.add_argument(f"--user-data-dir={self.user_data_dir}")
         self.options.add_argument(
             "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
 
-        # Указание пользовательского профиля для ускорения запуска
-        self.options.user_data_dir = "/home/kali/.config/selenium-profile"
-
-        # Указание пути к установленному браузеру (если известно)
-        browser_path = "/usr/bin/chromium"  # можно адаптировать под свой путь
+        # Уникальный профиль для каждого экземпляра
         try:
-            self.driver = SafeChrome(
+            self.driver = uc.Chrome(
                 options=self.options,
-                version_main=120,
-                browser_executable_path=browser_path
+                version_main=135,
+                driver_executable_path=self.driver_dir  # Уникальный путь к драйверу
             )
         except Exception as e:
-            self.logger.warning(f"Не удалось запустить Chrome по указанному пути: {e}")
-            # fallback без указания пути
-            self.driver = SafeChrome(options=self.options, version_main=120)
-
-        self.driver.get(self.base_url)
+            self.logger.warning(f"Ошибка undetected_chromedriver: {e}, пробуем стандартный Selenium")
+            try:
+                from selenium import webdriver
+                self.driver = webdriver.Chrome(options=self.options)
+            except Exception as e:
+                self.logger.error(f"Ошибка инициализации WebDriver: {e}")
+                raise
 
     def __enter__(self):
         return self
@@ -76,6 +86,12 @@ class DromParser:
                 self.logger.warning(f"Ошибка при закрытии драйвера: {e}")
             finally:
                 self.driver = None
+
+            # Удаляем временные папки
+        if hasattr(self, 'user_data_dir') and self.user_data_dir:
+            shutil.rmtree(self.user_data_dir, ignore_errors=True)
+        if hasattr(self, 'driver_dir') and self.driver_dir:
+            shutil.rmtree(self.driver_dir, ignore_errors=True)
 
     def parse(self):
         encoded_make = urllib.parse.quote(self.make.lower())

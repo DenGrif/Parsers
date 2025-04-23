@@ -97,80 +97,73 @@ def make_screenshot(driver, filename_prefix="error"):
         return None
 
 
-def safe_request(url, headers=None, timeout=15, use_proxy=True, retries=3, use_own_ip=False):
-    """Загрузка HTML-страницы через requests для Avito.ru."""
-    logging.info(f"Начало запроса через safe_request: {url}")
-    if headers is None:
-        headers = {}
+def safe_request(url, headers=None, timeout=10, use_proxy=True, retries=3, use_own_ip=False):
+    """Безопасный запрос HTML-страницы через requests с поддержкой прокси, сессий и повторных попыток."""
 
-    headers.update({
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Connection": "keep-alive",
-        "Cache-Control": "max-age=0"
-    })
+    logging.info(f"Начало safe_request: {url}")
 
-    proxy_used = False  # Для отслеживания, использовался ли прокси
-    logging.info(f"Запрос через safe_request завершен: {url}")
-    for attempt in range(retries + 1):
+    session = requests.Session()  # Сохраняет cookies между запросами
+    proxy_used = False
+    last_exception = None
+
+    for attempt in range(1, retries + 1):
         try:
+            # Задержка перед запросом для имитации реального пользователя
+            time.sleep(random.uniform(3, 6))
+
+            # Заголовки запроса
+            headers = {
+                "User-Agent": random.choice(USER_AGENTS),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Referer": "https://www.avito.ru/",
+                "Connection": "keep-alive",
+                "DNT": "1",
+                "Upgrade-Insecure-Requests": "1",
+            }
+
+            proxies = None
             if use_own_ip:
-                proxies = None  # Не используем прокси, если перешли на собственный IP
                 logging.info("Используется собственный IP.")
-            else:
-                proxy = get_working_proxy() if use_proxy else None
-                proxies = None
+            elif use_proxy:
+                proxy = get_working_proxy()
                 if proxy:
                     try:
-                        # Разбиваем строку прокси на части: host:port@login:password
-                        proxy_parts = proxy.split('@')
-                        host_port = proxy_parts[0]
-                        auth_part = proxy_parts[1]
-                        username, password = auth_part.split(':')
-
-                        # Формируем URL прокси с логином и паролем
+                        host_port, auth = proxy.split('@')
+                        username, password = auth.split(':')
                         proxy_url = f"http://{username}:{password}@{host_port}"
-                        proxies = {
-                            "http": proxy_url,
-                            "https": proxy_url
-                        }
-                        logging.info(f"Используется прокси: {proxy_url}")
+                        proxies = {"http": proxy_url, "https": proxy_url}
+                        logging.info(f"Попытка {attempt}/{retries} — используется прокси: {host_port}")
                         proxy_used = True
                     except Exception as e:
-                        logging.error(f"Ошибка парсинга прокси {proxy}: {str(e)}")
-                        proxy = None  # Пропускаем этот прокси
+                        logging.warning(f"Ошибка разбора прокси {proxy}: {e}")
+                        proxies = None
 
-            try:
-                response = requests.get(
-                    url,
-                    headers=headers,
-                    proxies=proxies,
-                    timeout=timeout
-                )
-                response.raise_for_status()
-                logging.info(f"Запрос к {url} выполнен за {response.elapsed.total_seconds():.2f} сек.")
-                return response
-            except RequestException as e:
-                if attempt < retries:
-                    logging.warning(
-                        f"Попытка {attempt + 1}/{retries} для {url} через {proxy or 'собственный IP'}: {e}"
-                    )
-                    # Экспоненциальная задержка (1, 2, 4 секунды между попытками)
-                    delay = 2 ** attempt
-                    time.sleep(delay)
-                else:
-                    logging.error(
-                        f"Не удалось выполнить запрос к {url} после {retries} попыток: {str(e)}"
-                    )
-                    if proxy_used:
-                        logging.info("Переходим к использованию собственного IP.")
-                        return safe_request(url, headers=headers, timeout=timeout, use_proxy=False, retries=retries, use_own_ip=True)
-                    return None
-        except Exception as e:
-            logging.error(f"Неизвестная ошибка: {str(e)}")
-            return None
+            response = session.get(url, headers=headers, proxies=proxies, timeout=timeout)
+
+            if response.status_code == 429:
+                logging.warning(f"Попытка {attempt}/{retries}: 429 Too Many Requests — ждём и повторяем...")
+                time.sleep(random.uniform(30, 60))
+                continue
+
+            response.raise_for_status()
+            logging.info(f"Успешный запрос к {url} за {response.elapsed.total_seconds():.2f} сек.")
+            return response
+
+        except RequestException as e:
+            last_exception = e
+            logging.warning(f"Попытка {attempt}/{retries} не удалась: {e}")
+            time.sleep(2 ** attempt)
+
+    # После всех попыток
+    logging.error(f"Не удалось получить {url} после {retries} попыток. Последняя ошибка: {last_exception}")
+
+    if proxy_used and not use_own_ip:
+        logging.info("Переход на собственный IP после неудачи с прокси.")
+        return safe_request(url, timeout=timeout, use_proxy=False, retries=retries, use_own_ip=True)
+
     return None
+
 
 
 def selenium_request(url, driver, use_proxy=True, retries=3):
@@ -357,414 +350,3 @@ def setup_logging():
     logging.info("Логирование настроено успешно!")  # Проверка, записывается ли лог
 
 
-
-
-
-# import os
-# import logging
-# import random
-# import requests
-# import time
-# from datetime import datetime
-# from requests.exceptions import RequestException
-# from selenium.webdriver.common.by import By
-# from selenium.webdriver.support.ui import WebDriverWait
-# from selenium.webdriver.support import expected_conditions as EC
-# from selenium import webdriver
-# from selenium.webdriver.chrome.service import Service
-# from selenium.webdriver.chrome.options import Options
-# from webdriver_manager.chrome import ChromeDriverManager
-#
-# # Файл с прокси
-# PROXY_FILE = "proxies.txt"
-#
-#
-# def load_proxies():
-#     """Загружает список прокси из файла"""
-#     try:
-#         with open(PROXY_FILE, "r") as f:
-#             proxies = [line.strip() for line in f if line.strip()]
-#         return proxies
-#     except FileNotFoundError:
-#         logging.error(f"Файл {PROXY_FILE} не найден!")
-#         return []
-#
-# PROXIES = load_proxies()
-#
-# # User-Agents
-# USER_AGENTS = [
-#     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-#     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15",
-#     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-# ]
-#
-# def get_random_user_agent():
-#     return random.choice(USER_AGENTS)
-#
-#
-# def get_random_proxy(proxies_file='proxies.txt'):
-#     """Чтение случайного прокси из файла"""
-#     with open(proxies_file, 'r') as f:
-#         proxies = f.readlines()
-#     return random.choice(proxies).strip()  # Возвращаем случайный прокси
-#
-#
-# def make_screenshot(driver, filename_prefix="error"):
-#     """Создает скриншот с текущим timestamp"""
-#     try:
-#         timestamp = datetime.now().strftime("%d%m%Y__%H%M%S")
-#         screenshot_path = f"error/{filename_prefix}_{timestamp}.png"
-#         driver.save_screenshot(screenshot_path)
-#         logging.info(f"Скриншот сохранен: {screenshot_path}")
-#         return screenshot_path
-#     except Exception as e:
-#         logging.error(f"Не удалось сделать скриншот: {str(e)}")
-#         return None
-#
-#
-# def safe_request(url, headers=None, timeout=15, use_proxy=True, retries=3):
-#     """Загрузка HTML-страницы через Selenium для Avito.ru"""
-#     if headers is None:
-#         headers = {}
-#
-#     headers.update({
-#         "User-Agent": random.choice(USER_AGENTS),
-#         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-#         "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-#         "Connection": "keep-alive",
-#         "Cache-Control": "max-age=0"
-#     })
-#
-#     for attempt in range(retries + 1):
-#         try:
-#             proxy = get_random_proxy() if use_proxy else None
-#             proxies = None
-#             auth = None
-#
-#             if proxy:
-#                 try:
-#                     # Разбиваем строку прокси на части: host:port@login:password
-#                     proxy_parts = proxy.split('@')
-#                     host_port = proxy_parts[0]
-#                     auth_part = proxy_parts[1]
-#                     username, password = auth_part.split(':')
-#
-#                     # Формируем URL прокси с логином и паролем
-#                     proxy_url = f"http://{username}:{password}@{host_port}"
-#                     proxies = {
-#                         "http": proxy_url,
-#                         "https": proxy_url
-#                     }
-#                     logging.info(f"Используется прокси: {proxy_url}")
-#                 except Exception as e:
-#                     logging.error(f"Ошибка парсинга прокси {proxy}: {str(e)}")
-#                     proxy = None  # Пропускаем этот прокси
-#
-#             try:
-#                 response = requests.get(
-#                     url,
-#                     headers=headers,
-#                     proxies=proxies,
-#                     timeout=timeout
-#                 )
-#                 response.raise_for_status()
-#                 logging.info(f"Запрос к {url} выполнен за {response.elapsed.total_seconds():.2f} сек.")
-#                 return response
-#             except RequestException as e:
-#                 if attempt < retries:
-#                     logging.warning(
-#                         f"Попытка {attempt + 1}/{retries} для {url} через {proxy or 'собственный IP'}: {e}"
-#                     )
-#                     # Экспоненциальная задержка (1, 2, 4 секунды между попытками)
-#                     delay = 2 ** attempt
-#                     time.sleep(delay)
-#                 else:
-#                     logging.error(
-#                         f"Не удалось выполнить запрос к {url} после {retries} попыток: {str(e)}"
-#                     )
-#                     if proxy:
-#                         logging.info("Переходим к использованию собственного IP.")
-#                         return safe_request(url, headers=headers, timeout=timeout, use_proxy=False, retries=retries)
-#                     return None
-#         except Exception as e:
-#             logging.error(f"Неизвестная ошибка: {str(e)}")
-#             return None
-#     return None
-#
-#
-# def selenium_request(url, driver, use_proxy=True, retries=3):
-#     """Загрузка HTML-страницы через Selenium для Auto.ru"""
-#     for attempt in range(retries + 1):
-#         try:
-#             proxy = get_random_proxy() if use_proxy else None
-#
-#             if proxy:
-#                 try:
-#                     # Разбиваем строку прокси на части: host:port@login:password
-#                     proxy_parts = proxy.split('@')
-#                     host_port = proxy_parts[0]
-#                     auth_part = proxy_parts[1]
-#                     username, password = auth_part.split(':')
-#
-#                     # Формируем URL прокси с логином и паролем
-#                     proxy_url = f"http://{username}:{password}@{host_port}"
-#
-#                     # Настройка прокси в ChromeOptions
-#                     options = Options()
-#                     options.add_argument("--headless")
-#                     options.add_argument("--ignore-certificate-errors")
-#                     options.add_argument("--disable-blink-features=AutomationControlled")
-#                     options.add_argument("--disable-features=SecureDns")
-#                     options.add_argument(
-#                         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-#                     )
-#                     options.add_argument(f"--proxy-server={proxy_url}")
-#
-#                     logging.info(f"Используется прокси: {proxy_url}")
-#                 except Exception as e:
-#                     logging.error(f"Ошибка парсинга прокси {proxy}: {str(e)}")
-#                     proxy = None  # Пропускаем этот прокси
-#             else:
-#                 logging.info("Используется собственный IP.") # после 3 не удачных попыток
-#                 options = Options()
-#                 options.add_argument("--headless")
-#                 options.add_argument("--ignore-certificate-errors")
-#                 options.add_argument("--disable-blink-features=AutomationControlled")
-#                 options.add_argument("--disable-features=SecureDns")
-#                 options.add_argument(
-#                     "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-#                 )
-#
-#             # Инициализация драйвера с текущими настройками
-#             if not driver:
-#                 driver = webdriver.Chrome(
-#                     service=Service(ChromeDriverManager().install()), options=options
-#                 )
-#
-#             start_time = time.time()
-#             driver.get(url)
-#
-#             # Проверка на SSO-страницу
-#             if "sso.auto.ru" in driver.current_url:
-#                 driver.find_element(By.TAG_NAME, "form").submit()
-#                 time.sleep(2)  # Ждём редирект
-#
-#             # Ожидание загрузки объявлений
-#             WebDriverWait(driver, 15).until(
-#                 EC.presence_of_element_located((By.CLASS_NAME, "ListingItem"))
-#             )
-#             elapsed_time = time.time() - start_time
-#             logging.info(f"Запрос к {url} выполнен за {elapsed_time:.2f} сек.")
-#
-#             return driver.page_source, driver, True  # Возвращаем True, если запрос успешен
-#         except Exception as e:
-#             if attempt < retries:
-#                 logging.warning(
-#                     f"Попытка {attempt + 1}/{retries} для {url} через {proxy or 'собственный IP'}: {e}"
-#                 )
-#                 # Экспоненциальная задержка (1, 2, 4 секунды между попытками)
-#                 delay = 2 ** attempt
-#                 time.sleep(delay)
-#             else:
-#                 logging.error(
-#                     f"Не удалось выполнить запрос к {url} после {retries} попыток: {str(e)}"
-#                 )
-#                 if proxy:
-#                     logging.info("Переходим к использованию собственного IP.")
-#                     return selenium_request(url, None, use_proxy=False, retries=retries)
-#                 return "", None, False  # Возвращаем False, если запрос неуспешен
-#     return "", None, False  # Возвращаем False, если запрос неуспешен
-#
-#
-# def selenium_request_drom(url, driver, use_proxy=True, retries=3):
-#     """Загрузка HTML-страницы через Selenium для Drom.ru"""
-#     for attempt in range(retries + 1):
-#         try:
-#             proxy = get_random_proxy() if use_proxy else None
-#
-#             if proxy:
-#                 try:
-#                     # Разбиваем строку прокси на части: host:port@login:password
-#                     proxy_parts = proxy.split('@')
-#                     host_port = proxy_parts[0]
-#                     auth_part = proxy_parts[1]
-#                     username, password = auth_part.split(':')
-#
-#                     # Формируем URL прокси с логином и паролем
-#                     proxy_url = f"http://{username}:{password}@{host_port}"
-#
-#                     # Настройка прокси в ChromeOptions
-#                     options = webdriver.ChromeOptions()
-#                     options.add_argument("--headless")
-#                     options.add_argument("--ignore-certificate-errors")
-#                     options.add_argument("--disable-blink-features=AutomationControlled")
-#                     options.add_argument("--disable-features=SecureDns")
-#                     options.add_argument(
-#                         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-#                     )
-#                     options.add_argument(f"--proxy-server={proxy_url}")
-#
-#                     logging.info(f"Используется прокси: {proxy_url}")
-#                 except Exception as e:
-#                     logging.error(f"Ошибка парсинга прокси {proxy}: {str(e)}")
-#                     proxy = None  # Пропускаем этот прокси
-#             else:
-#                 logging.info("Используется собственный IP.") # после 3 не удачных попыток
-#                 options = webdriver.ChromeOptions()
-#                 options.add_argument("--headless")
-#                 options.add_argument("--ignore-certificate-errors")
-#                 options.add_argument("--disable-blink-features=AutomationControlled")
-#                 options.add_argument("--disable-features=SecureDns")
-#                 options.add_argument(
-#                     "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-#                 )
-#
-#             # Инициализация драйвера с текущими настройками
-#             if not driver:
-#                 driver = webdriver.Chrome(
-#                     service=Service(ChromeDriverManager().install()), options=options
-#                 )
-#
-#             start_time = time.time()
-#             driver.get(url)
-#
-#             # Ожидание загрузки объявлений
-#             WebDriverWait(driver, 15).until(
-#                 EC.presence_of_element_located((By.CSS_SELECTOR, "[data-ftid='bulls-list_bull']"))
-#             )
-#             elapsed_time = time.time() - start_time
-#             logging.info(f"Запрос к {url} выполнен за {elapsed_time:.2f} сек.")
-#
-#             return driver.page_source, driver, True  # Возвращаем True, если запрос успешен
-#         except Exception as e:
-#             if attempt < retries:
-#                 logging.warning(
-#                     f"Попытка {attempt + 1}/{retries} для {url} через {proxy or 'собственный IP'}: {e}"
-#                 )
-#                 # Экспоненциальная задержка (1, 2, 4 секунды между попытками)
-#                 delay = 2 ** attempt
-#                 time.sleep(delay)
-#             else:
-#                 logging.error(
-#                     f"Не удалось выполнить запрос к {url} после {retries} попыток: {str(e)}"
-#                 )
-#                 if proxy:
-#                     logging.info("Переходим к использованию собственного IP.")
-#                     return selenium_request_drom(url, driver, use_proxy=False, retries=retries)
-#                 return "", None, False  # Возвращаем False, если запрос неуспешен
-#     return "", None, False  # Возвращаем False, если запрос неуспешен
-#
-#
-# # Настройка логирования
-# def setup_logging():
-#     log_dir = "logs"
-#     if not os.path.exists(log_dir):  # Создаём папку, если её нет
-#         os.makedirs(log_dir)
-#     log_filename = os.path.join(log_dir, f"parser_log_{datetime.now().strftime('%Y-%m-%d__%H-%M')}.log")
-#     logging.basicConfig(
-#         level=logging.DEBUG,
-#         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-#         handlers=[
-#             logging.FileHandler(log_filename, encoding="utf-8"),
-#             logging.StreamHandler()
-#         ],
-#         force=True  # Принудительное обновление конфигурации
-#     )
-#     logging.getLogger("selenium.webdriver.remote.remote_connection").setLevel(logging.WARNING)
-#     logging.getLogger("urllib3").setLevel(logging.WARNING)
-#     logging.info("Логирование настроено успешно!")  # Проверка, записывается ли лог
-
-# def selenium_request(url, driver=None, use_proxy=True, retries=3):
-#     """Загрузка HTML-страницы через Selenium для Auto.ru с поддержкой прокси и SSO"""
-#     for attempt in range(retries + 1):
-#         start_time = time.time()
-#         proxy = get_random_proxy() if use_proxy else None
-#
-#         try:
-#             # Настройка Selenium options
-#             options = Options()
-#             options.add_argument("--headless")
-#             options.add_argument("--ignore-certificate-errors")
-#             options.add_argument("--disable-blink-features=AutomationControlled")
-#             options.add_argument("--disable-features=SecureDns")
-#             options.add_argument(f"--user-agent={get_random_user_agent()}")
-#
-#             if proxy:
-#                 try:
-#                     proxy_parts = proxy.split('@')
-#                     host_port = proxy_parts[0]
-#                     auth_part = proxy_parts[1]
-#                     username, password = auth_part.split(':')
-#
-#                     proxy_url = f"http://{username}:{password}@{host_port}"
-#                     options.add_argument(f"--proxy-server={proxy_url}")
-#
-#                     logging.info(f"[{attempt + 1}/{retries}] Используется прокси: {proxy_url}")
-#                 except Exception as e:
-#                     logging.error(f"Ошибка разбора прокси {proxy}: {e}")
-#                     proxy = None
-#             else:
-#                 logging.info(f"[{attempt + 1}/{retries}] Используется собственный IP")
-#
-#             driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-#             driver.get(url)
-#
-#             # Проверка на SSO-страницу авторизации
-#             if "sso.auto.ru" in driver.current_url:
-#                 logging.info("Обнаружена страница авторизации SSO — отправляем форму...")
-#                 try:
-#                     driver.find_element(By.TAG_NAME, "form").submit()
-#                     time.sleep(2)  # Даем время на редирект после сабмита
-#                 except Exception as e:
-#                     logging.warning(f"Ошибка при обработке SSO страницы: {e}")
-#
-#             # Ожидание загрузки нужного контента
-#             WebDriverWait(driver, 15).until(
-#                 EC.presence_of_element_located((By.CLASS_NAME, "ListingItem"))
-#             )
-#
-#             elapsed_time = time.time() - start_time
-#             logging.info(f"Запрос к {url} выполнен за {elapsed_time:.2f} сек.")
-#
-#             return driver.page_source, driver, True  # Успешно
-#
-#         except Exception as e:
-#             logging.warning(f"[{attempt + 1}/{retries}] Ошибка при запросе {url} через {proxy or 'собственный IP'}: {e}")
-#             time.sleep(2 ** attempt)  # Экспоненциальная задержка
-#
-#             if attempt == retries:
-#                 if use_proxy:
-#                     logging.info("Попытки с прокси исчерпаны — пробуем без прокси")
-#                     return selenium_request(url, None, use_proxy=False, retries=retries)
-#                 else:
-#                     logging.error(f"Не удалось загрузить страницу {url} после {retries} попыток.")
-#                     return "", None, False
-#
-#     return "", None, False
-
-
-# def load_proxies():
-#     """Загружает список прокси из файла"""
-#     try:
-#         with open(PROXY_FILE, "r") as f:
-#             proxies = [line.strip() for line in f if line.strip()]
-#         if proxies:
-#             logging.info(f"Загружено {len(proxies)} прокси из файла {PROXY_FILE}")
-#         else:
-#             logging.warning(f"Файл {PROXY_FILE} пуст — работа будет вестись с собственным IP")
-#         return proxies
-#     except FileNotFoundError:
-#         logging.warning(f"Файл {PROXY_FILE} не найден — работа будет вестись с собственным IP")
-#         return []
-#
-# PROXIES = load_proxies()
-
-
-# def get_random_user_agent():
-#     return random.choice(USER_AGENTS)
-#
-# def get_random_proxy():
-#     """Получение случайного прокси, если они есть"""
-#     if not PROXIES:
-#         return None
-#     return random.choice(PROXIES)

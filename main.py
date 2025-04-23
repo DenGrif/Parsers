@@ -3,6 +3,7 @@ import argparse
 import json
 import threading
 import logging
+import subprocess
 from calculator import calculate_collateral
 from datetime import datetime
 from parsers import AvitoParser, AutoRuParser, DromParser

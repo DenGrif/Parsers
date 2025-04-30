@@ -7,9 +7,6 @@ import random
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
 from utils import selenium_request
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 
 
 class SafeChrome(uc.Chrome):

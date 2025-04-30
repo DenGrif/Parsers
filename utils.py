@@ -3,7 +3,7 @@ import logging
 import random
 import requests
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from requests.exceptions import RequestException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait

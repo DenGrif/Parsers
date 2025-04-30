@@ -1,0 +1,12 @@
+{
+    "make": "lada",
+    "model": "granta",
+    "year": [
+        2020,
+        2025
+    ],
+    "limit": 30,
+    "cars_parsed": 30,
+    "average_price": 995103,
+    "collateral_value": 796082
+}

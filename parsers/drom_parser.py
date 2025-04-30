@@ -1,17 +1,12 @@
 import logging
 import shutil
 import tempfile
-import re
-import subprocess
 import urllib.parse
 import time
 import random
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
 from utils import selenium_request_drom
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 
 
 class SafeChrome(uc.Chrome):
